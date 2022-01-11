@@ -17,17 +17,27 @@ path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
 chunksize=10000
 
 
-def get_csr_memory_usage(spare_csr):
-    '''
-    Calc memory usage of a spare matrix and print it
-    
-    Params:
-    spare_csr: spare scipy matrix
-
-    '''
-    mem = (spare_csr.data.nbytes + spare_csr.indptr.nbytes + spare_csr.indices.nbytes) * BYTES_TO_MB_DIV
+def print_memory_usage_of_data_frame(df):
+    mem = round(df.memory_usage().sum() * BYTES_TO_MB_DIV, 3) 
     print("Memory usage is " + str(mem) + " MB")
 
+def convert_to_sparse_pandas(df, exclude_columns=[]):
+    """
+    Converts columns of a data frame into SparseArrays and returns the data frame with transformed columns.
+    Use exclude_columns to specify columns to be excluded from transformation.
+    :param df: pandas data frame
+    :param exclude_columns: list
+        Columns not be converted to sparse
+    :return: pandas data frame
+    """
+    exclude_columns = set(exclude_columns)
+
+    for (columnName, columnData) in df.iteritems():
+        if columnName in exclude_columns:
+            continue
+        df[columnName] = pd.arrays.SparseArray(columnData.values, dtype='float64')
+
+    return df
 def calc_rank(cx,index,N=10):
     '''
     Ranking the top N client  cosine similarity of each client
@@ -62,16 +72,18 @@ def calc_rank(cx,index,N=10):
     for i,j,v in zip(cx.row, cx.col, cx.data):
         if(i != current_row):
             #sort in descending order
-            temp=sorted(temp, key=lambda d: d['peso']) 
+            temp=sorted(temp, key=lambda d: d['cosine distance']) 
+            
             #only rank the top N element
-            [element.update({"rank":index+1}) for index,element in enumerate(temp[0:N]) ]
-            for element in temp[0:N]:
+            size= N if N< len(temp) else len(temp) 
+            [element.update({"rank":index+1}) for index,element in enumerate(temp[0:size]) ]
+            for element in temp[0:size]:
                             #Current Client       Neighbor       cosine distance  rank position"
-                data.append([index[current_row],element["vecino"],element["peso"],element["rank"]])
+                data.append([index[current_row],element["Neighbor"],element["cosine distance"],element["rank"]])
             current_row=i
             temp=[]
                                         #cosine distance
-        temp.append({"vecino":index[j],"peso":1-v})
+        temp.append({"Neighbor":index[j],"cosine distance":1-v})
     return data
 
 
@@ -81,32 +93,33 @@ def main():
 
     #Read csv file in chunks so memory not colapse
     chunks=pd.read_csv(path,index_col="n_cliente",converters={'n_cliente' : str}, chunksize=chunksize)
-    sp_data = []
-    columns=[]
-    index=np.array([])
-    #transform data to sparse matrix, to save memory and improve perfomance
-    for chunk in chunks:
-        data=csr_matrix(chunk.drop(['Cluster_Cuantitativo'], axis=1))
-        sp_data.append(data)
-        if(len(columns)==0):
-            columns=chunk.columns
-        index=np.concatenate((index,chunk.index))
-    sp_data = vstack(sp_data)
+    df = pd.concat( [ convert_to_sparse_pandas(chunk,exclude_columns=["n_cliente","Cluster_Cuantitativo"]) for chunk in chunks ] )
+    print_memory_usage_of_data_frame(df)
     print("--- Reading %s seconds ---" % (time.time() - start_time))
 
-    #print memory in use
-    get_csr_memory_usage(sp_data)
-    #calc cosine similarity
-    df_cosine=cosine_similarity(sp_data,dense_output=False)
-    cx=coo_matrix(df_cosine)
-    print("--- cosine_similarity %s seconds ---" % (time.time() - start_time))
-
-    rank_data=calc_rank(cx,index,N=30)
-    print("--- calc_rank %s seconds ---" % (time.time() - start_time))
+    cluster_group = df.groupby("Cluster_Cuantitativo")
+    data=[]
+    for cluster, rows in cluster_group:
+        print(cluster)
+        print(rows.shape)
+        indexs=rows.index
+        
+        #Calc Cosine similarity
+        sp_cl=csr_matrix(rows.drop(['Cluster_Cuantitativo'], axis=1))
+        sp_cl=cosine_similarity(sp_cl,dense_output=False)
+        sp_cl=coo_matrix(sp_cl)
+        #calc rank data
+        sp_cl=calc_rank(sp_cl,indexs,N=30)
+        if(len(data) == 0):
+            data=sp_cl.copy()
+        else:
+            data = np.concatenate((data, sp_cl))
+        print("--- Reading %s seconds ---" % (time.time() - start_time))
+        
 
     #save
-    df=pd.DataFrame(rank_data,columns=["n_client","vecino","peso","rank"])
-    df.to_csv(path_write)
+    final_df=pd.DataFrame(data,columns=["n_cliente","nearest neighbor - <RowID>","distance","nearest neighbor - index"])
+    final_df.to_csv(path_write)
     print("--- Final %s seconds ---" % (time.time() - start_time))
 
 if __name__ == "__main__":
