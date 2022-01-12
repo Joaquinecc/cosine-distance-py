@@ -16,6 +16,9 @@ path="C:/Users/datoadmin/bristol/rating-productos.csv"
 path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
 chunksize=10000
 
+def get_csr_memory_usage(X_csr):
+    mem = (X_csr.data.nbytes + X_csr.indptr.nbytes + X_csr.indices.nbytes) * BYTES_TO_MB_DIV
+    print("Memory usage is " + str(mem) + " MB")
 
 def print_memory_usage_of_data_frame(df):
     mem = round(df.memory_usage().sum() * BYTES_TO_MB_DIV, 3) 
@@ -91,11 +94,26 @@ def main():
     print("Start..")
     print("--- %s seconds ---" % (time.time() - start_time))
 
-    #Read csv file in chunks so memory not colapse
-    chunks=pd.read_csv(path,index_col="n_cliente",converters={'n_cliente' : str}, chunksize=chunksize)
-    df = pd.concat( [ convert_to_sparse_pandas(chunk,exclude_columns=["n_cliente","Cluster_Cuantitativo"]) for chunk in chunks ] )
-    print_memory_usage_of_data_frame(df)
+    #Get DATA by chunks and transform to spare
+    chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=5000)
+    sp_data = []
+    columns=[]
+    clusters=np.array([])
+    clients_row=np.array([])
+    for chunk in chunks:
+        data=csr_matrix(chunk.drop(['Cluster_Cuantitativo',"n_cliente"], axis=1))
+        sp_data.append(data)
+        if(len(columns)==0):
+            columns=chunk.columns
+        clients_row=np.concatenate((clients_row,chunk['n_cliente'].to_numpy()))
+        clusters=np.concatenate((clusters,chunk['Cluster_Cuantitativo'].to_numpy()))
+    sp_data = vstack(sp_data)
+    get_csr_memory_usage(sp_data)
     print("--- Reading %s seconds ---" % (time.time() - start_time))
+    #transform to spare panda, easier to filter by cluster
+    df=pd.DataFrame.sparse.from_spmatrix(sp_data,index=clients_row)
+    print_memory_usage_of_data_frame(df)
+    df['Cluster_Cuantitativo'] = clusters
 
     cluster_group = df.groupby("Cluster_Cuantitativo")
     data=[]
