@@ -15,6 +15,7 @@ Global Variables
 path="C:/Users/datoadmin/bristol/rating-productos.csv"
 path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
 chunksize=10000
+N=10
 
 def get_csr_memory_usage(X_csr):
     mem = (X_csr.data.nbytes + X_csr.indptr.nbytes + X_csr.indices.nbytes) * BYTES_TO_MB_DIV
@@ -41,7 +42,7 @@ def convert_to_sparse_pandas(df, exclude_columns=[]):
         df[columnName] = pd.arrays.SparseArray(columnData.values, dtype='float64')
 
     return df
-def calc_rank(cx,index,N=10):
+def ranking_similarity_client(cx,index,N=10):
     '''
     Ranking the top N client  cosine similarity of each client
 
@@ -89,7 +90,44 @@ def calc_rank(cx,index,N=10):
         temp.append({"Neighbor":index[j],"cosine distance":1-v})
     return data
 
+def rank_sku(df_ratings,rows,n_client):
+    #Neighbor ratings products 
+    df_rating_neighbor= df_ratings.loc[rows["nearest neighbor - <RowID>"]].drop(["Cluster_Cuantitativo"], axis=1)
+    #drop producto columns fill with 0 (product that where not consumed)
+    df_rating_neighbor=df_rating_neighbor.loc[:, (df_rating_neighbor != 0).any(axis=0)]
 
+
+    #Drop products n_client already consume
+    #df_rating_n_client= df_rating_neighbor.loc[[n_client]]
+    df_rating_n_client= df_ratings.loc[[n_client]].drop(["Cluster_Cuantitativo"], axis=1)
+    df_rating_n_client=df_rating_n_client.loc[:, (df_rating_n_client != 0).any(axis=0)]
+    product_already_consumed=df_rating_n_client.columns.tolist()
+    df_rating_neighbor=df_rating_neighbor.drop(product_already_consumed, axis=1)
+
+
+    #Calc ratingXdistance
+    df_rating_neighbor["distance"]=rows["distance"].to_numpy().astype(float)
+    for cols in df_rating_neighbor:
+        if cols != "distance":
+            df_rating_neighbor[cols]=df_rating_neighbor[cols]*df_rating_neighbor["distance"]
+    
+    #Calc weights
+    df_temp=df_rating_neighbor.sum()
+    if (df_temp["distance"] == 0):
+        df_temp=pd.DataFrame(np.full(df_temp.shape, 0.1),index=df_temp.index,columns=["weigth"]).drop(["distance"],axis=0)
+    else:
+        df_temp=df_temp.div(df_temp["distance"], axis=0, fill_value=0)
+        df_temp=df_temp.drop(["distance"],axis=0)
+        df_temp=pd.DataFrame((df_temp),columns=["weigth"])
+    
+    #current client and product"
+    df_temp["producto"]=df_temp.index
+    df_temp["n_client"]=[n_client]*len(df_temp)
+    #rank by weight
+    df_temp=df_temp.sort_values(by=['weigth'],ascending=False)
+    df_temp["rank"]=np.arange(1,df_temp.shape[0]+1)
+    df_temp=df_temp[df_temp["rank"]<=N]    
+    return df_temp
 def main():
     print("Start..")
     print("--- %s seconds ---" % (time.time() - start_time))
@@ -97,47 +135,55 @@ def main():
     #Get DATA by chunks and transform to spare
     chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=5000)
     sp_data = []
-    columns=[]
+    product_list=[]
     clusters=np.array([])
     clients_row=np.array([])
     for chunk in chunks:
         data=csr_matrix(chunk.drop(['Cluster_Cuantitativo',"n_cliente"], axis=1))
         sp_data.append(data)
-        if(len(columns)==0):
-            columns=chunk.columns
+        if(len(product_list)==0):
+            product_list=chunk.columns[( chunk.columns != "n_cliente" ) & (chunk.columns != "Cluster_Cuantitativo")]
+            product_list=[ sku.replace("COD_","") for sku in product_list]
         clients_row=np.concatenate((clients_row,chunk['n_cliente'].to_numpy()))
         clusters=np.concatenate((clusters,chunk['Cluster_Cuantitativo'].to_numpy()))
     sp_data = vstack(sp_data)
     get_csr_memory_usage(sp_data)
     print("--- Reading %s seconds ---" % (time.time() - start_time))
     #transform to spare panda, easier to filter by cluster
-    df=pd.DataFrame.sparse.from_spmatrix(sp_data,index=clients_row)
-    print_memory_usage_of_data_frame(df)
-    df['Cluster_Cuantitativo'] = clusters
+    df_ratings=pd.DataFrame.sparse.from_spmatrix(sp_data,index=clients_row,columns=product_list)
+    print_memory_usage_of_data_frame(df_ratings)
+    df_ratings['Cluster_Cuantitativo'] = clusters
 
-    cluster_group = df.groupby("Cluster_Cuantitativo")
+
+    #Calc distance btw clients and ranking by similarity
+    cluster_group = df_ratings.groupby("Cluster_Cuantitativo")
     data=[]
     for cluster, rows in cluster_group:
-        print(cluster)
-        print(rows.shape)
         indexs=rows.index
-        
         #Calc Cosine similarity
         sp_cl=csr_matrix(rows.drop(['Cluster_Cuantitativo'], axis=1))
         sp_cl=cosine_similarity(sp_cl,dense_output=False)
         sp_cl=coo_matrix(sp_cl)
         #calc rank data
-        sp_cl=calc_rank(sp_cl,indexs,N=30)
+        sp_cl=ranking_similarity_client(sp_cl,indexs,N=N)
         if(len(data) == 0):
             data=sp_cl.copy()
         else:
             data = np.concatenate((data, sp_cl))
-        print("--- Reading %s seconds ---" % (time.time() - start_time))
+    print("--- Ranking similarity by  client %s seconds ---" % (time.time() - start_time))
         
 
+        
+    df_rank=pd.DataFrame(data,columns=["n_client","nearest neighbor - <RowID>","distance","nearest neighbor - index"])
+    clients_group = df_rank.groupby("n_client")
+    df_ranking_sku=pd.DataFrame([],columns=["weigth","producto","n_client","rank"])
+    for n_client, rows in clients_group:
+        print(n_client)
+        df_ranking_sku=df_ranking_sku.append(rank_sku(df_ratings,rows,n_client))
+        print("--- Time client %s seconds ---" % (time.time() - start_time))
+
     #save
-    final_df=pd.DataFrame(data,columns=["n_cliente","nearest neighbor - <RowID>","distance","nearest neighbor - index"])
-    final_df.to_csv(path_write)
+    df_ranking_sku.to_csv(path_write)
     print("--- Final %s seconds ---" % (time.time() - start_time))
 
 if __name__ == "__main__":
