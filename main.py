@@ -13,8 +13,8 @@ BYTES_TO_MB_DIV = 0.000001
 Global Variables
 
 '''
-path="C:/Users/datoadmin/bristol/rating-productos.csv"
-path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
+path="fill-this"
+path_write="fill-this"
 chunksize=10000
 N=10
 
@@ -95,7 +95,6 @@ def ranking_similarity_client(cx,index,N=10):
 def rank_sku(args):
     df_ratings,rows,n_client,N = args
     print(n_client)
-    print(" %s seconds ---" % (time.time() - start_time))
 
     #Neighbor ratings products 
     df_rating_neighbor= df_ratings.loc[rows["nearest neighbor - <RowID>"]].drop(["Cluster_Cuantitativo"], axis=1)
@@ -186,7 +185,7 @@ def main():
     df_ranking_sku=pd.DataFrame([],columns=["weigth","producto","n_client","rank"])
 
     with Pool(cpu_count()) as pool:
-        df_ranking_sku.append(pool.map( rank_sku, [(df_ratings,rows,n_client,N) for n_client, rows in clients_group]))
+        df_ranking_sku=df_ranking_sku.append(pool.map( rank_sku, [(df_ratings,rows,n_client,N) for n_client, rows in clients_group]))
 
 
     #save
