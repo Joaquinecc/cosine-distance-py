@@ -10,13 +10,14 @@ BYTES_TO_MB_DIV = 0.000001
 
 '''
 
-Global Variables
+Global Variable
 
 '''
 path="C:/Users/datoadmin/bristol/rating-productos.csv"
 path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
 chunksize=10000
-N=10
+topNProduct=15
+topNSimilarity=30
 
 def get_csr_memory_usage(X_csr):
     mem = (X_csr.data.nbytes + X_csr.indptr.nbytes + X_csr.indices.nbytes) * BYTES_TO_MB_DIV
@@ -58,15 +59,6 @@ def ranking_similarity_client(cx,index,N=10):
     Ex:
     [['0000250', '0000250', 1.0000000000000002, 0],
      ['0000250', '015877', 0.718819103532109, 1],
-     ['0000250', 'MO621484', 0.7160569503736789, 2],
-     ['0000250', 'MO621430', 0.7160569503736789, 3],
-     ['0000250', 'MO620178', 0.7160569503736789, 4],
-     ['0000250', 'MO620138', 0.7160569503736789, 5],
-     ['0000250', 'MO618804', 0.7160569503736789, 6],
-     ['0000250', 'MO617581', 0.7160569503736789, 7],
-     ['0000250', 'MO615424', 0.7160569503736789, 8],
-     ['0000250', 'MO614825', 0.7160569503736789, 9],
-     ['001384', '001384', 1.0, 0],
      ...]
 
     '''
@@ -93,6 +85,18 @@ def ranking_similarity_client(cx,index,N=10):
 
 
 def rank_sku(args):
+    '''
+    Chose the N product with the highest weigh
+
+    Params
+    df_ratings: Panda dataframe : containig user ratings
+    rows: Panda dataframe : containing neighbor cosine similarity
+    N: unit:  Number of product to recomend
+
+    return: 
+    Panda Dataframe, with columns 0 [n_client,producto,weigth,rank]
+    
+    '''
     df_ratings,rows,n_client,N = args
     print(n_client)
 
@@ -139,7 +143,7 @@ def main():
     print("--- %s seconds ---" % (time.time() - start_time))
 
     #Get DATA by chunks and transform to spare
-    chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=chunksize)
+    chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=5000)
     sp_data = []
     product_list=[]
     clusters=np.array([])
@@ -171,7 +175,7 @@ def main():
         sp_cl=cosine_similarity(sp_cl,dense_output=False)
         sp_cl=coo_matrix(sp_cl)
         #calc rank data
-        sp_cl=ranking_similarity_client(sp_cl,indexs,N=N)
+        sp_cl=ranking_similarity_client(sp_cl,indexs,N=topNSimilarity)
         if(len(data) == 0):
             data=sp_cl.copy()
         else:
@@ -185,7 +189,7 @@ def main():
     df_ranking_sku=pd.DataFrame([],columns=["weigth","producto","n_client","rank"])
 
     with Pool(cpu_count()) as pool:
-        df_ranking_sku=df_ranking_sku.append(pool.map( rank_sku, [(df_ratings,rows,n_client,N) for n_client, rows in clients_group]))
+        df_ranking_sku=df_ranking_sku.append(pool.map( rank_sku, [(df_ratings,rows,n_client,topNProduct) for n_client, rows in clients_group]))
 
 
     #save
