@@ -13,8 +13,8 @@ BYTES_TO_MB_DIV = 0.000001
 Global Variables
 
 '''
-path="fill-this"
-path_write="fill-this"
+path="C:/Users/datoadmin/bristol/rating-productos.csv"
+path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
 chunksize=10000
 N=10
 
@@ -139,7 +139,7 @@ def main():
     print("--- %s seconds ---" % (time.time() - start_time))
 
     #Get DATA by chunks and transform to spare
-    chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=5000)
+    chunks=pd.read_csv(path,converters={'n_cliente' : str, 'Cluster_Cuantitativo':str}, chunksize=chunksize)
     sp_data = []
     product_list=[]
     clusters=np.array([])
