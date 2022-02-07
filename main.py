@@ -5,6 +5,9 @@ from scipy.sparse import lil_matrix
 import numpy as np
 import time
 from multiprocessing import  Pool,cpu_count
+import json
+ 
+
 start_time = time.time()
 BYTES_TO_MB_DIV = 0.000001
 
@@ -13,11 +16,16 @@ BYTES_TO_MB_DIV = 0.000001
 Global Variable
 
 '''
-path="C:/Users/datoadmin/bristol/rating-productos.csv"
-path_write="C:/Users/datoadmin/bristol/ranking-client.csv"
-chunksize=10000
-topNProduct=15
-topNSimilarity=30
+
+# Opening JSON file setting
+f = open('settings-params.json') 
+#Read setting params
+settings_var = json.load(f)
+path=settings_var['read_path']
+path_write=settings_var['path_write']
+chunksize=settings_var['chunksize']
+topNProduct=settings_var['topNProduct']
+topNSimilarity=settings_var['topNSimilarity']
 
 def get_csr_memory_usage(X_csr):
     mem = (X_csr.data.nbytes + X_csr.indptr.nbytes + X_csr.indices.nbytes) * BYTES_TO_MB_DIV
